@@ -1,0 +1,28 @@
+services:
+  gateway:
+    build: ./gateway
+    ports:
+      - "3000:3000"
+      - "5000:5000"
+    depends_on:
+      - replica1
+      - replica2
+      - replica3
+
+  replica1:
+    build: ./replica
+    environment:
+      - PORT=4001
+      - ID=replica1
+
+  replica2:
+    build: ./replica
+    environment:
+      - PORT=4002
+      - ID=replica2
+
+  replica3:
+    build: ./replica
+    environment:
+      - PORT=4003
+      - ID=replica3

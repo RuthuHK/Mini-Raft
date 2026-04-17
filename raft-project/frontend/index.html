@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Distributed Drawing Board</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background: #5b9bd5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px;
+      font-family: sans-serif;
+    }
+
+    h2 {
+      font-family: 'Pacifico', cursive;
+      color: white;
+      font-size: 2.4rem;
+      margin-bottom: 20px;
+      letter-spacing: 1px;
+      text-shadow: 2px 3px 0px rgba(0,0,0,0.15);
+    }
+
+    #controls {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    canvas {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.2);
+    }
+  </style>
+</head>
+
+<body>
+
+<h2> Drawing Board</h2>
+
+<div id="controls">
+  <label>Color:</label>
+  <input type="color" id="colorPicker" value="#000000">
+
+  <label>Brush Size:</label>
+  <input type="range" id="brushSize" min="1" max="20" value="2">
+
+  <div id="eraserControls" style="display:none;">
+    <label>Eraser Size:</label>
+    <input type="range" id="eraserSize" min="5" max="40" value="10">
+  </div>
+
+  <button onclick="setPen()">Pen</button>
+  <button onclick="setEraser()">Eraser</button>
+  <button onclick="clearCanvas()">Clear</button>
+  <button onclick="undo()">Undo</button>
+</div>
+
+<canvas id="canvas" width="800" height="500"></canvas>
+
+<script>
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const ws = new WebSocket("ws://192.168.0.6:3000");
+
+let drawing = false;
+let lastX = 0;
+let lastY = 0;
+
+let color = "#000000";
+let brushSize = 2;
+let eraserSize = 10;
+let isEraser = false;
+
+let strokes = [];
+let currentStroke = [];
+
+document.getElementById("colorPicker").oninput = (e) => {
+  color = e.target.value;
+  setPen();
+};
+
+document.getElementById("brushSize").oninput = (e) => {
+  brushSize = e.target.value;
+};
+
+document.getElementById("eraserSize").oninput = (e) => {
+  eraserSize = e.target.value;
+};
+
+function setEraser() {
+  isEraser = true;
+  document.getElementById("eraserControls").style.display = "inline";
+}
+
+function setPen() {
+  isEraser = false;
+  document.getElementById("eraserControls").style.display = "none";
+}
+
+canvas.addEventListener("mousedown", (e) => {
+  drawing = true;
+  lastX = e.offsetX;
+  lastY = e.offsetY;
+  currentStroke = [];
+});
+
+canvas.addEventListener("mouseup", () => {
+  drawing = false;
+  if (currentStroke.length > 0) {
+    strokes.push(currentStroke);
+  }
+});
+
+canvas.addEventListener("mouseleave", () => {
+  drawing = false;
+  canvas.style.cursor = "default";
+});
+
+canvas.addEventListener("mousemove", (e) => {
+  if (isEraser) {
+    const size = eraserSize;
+    canvas.style.cursor = `url('data:image/svg+xml;utf8,
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+        <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" 
+        fill="rgba(255,255,255,0.3)" stroke="black" stroke-width="2"/>
+      </svg>') ${size/2} ${size/2}, auto`;
+  } else {
+    canvas.style.cursor = "default";
+  }
+
+  if (!drawing || ws.readyState !== 1) return;
+
+  const size = isEraser ? eraserSize : brushSize;
+
+  const data = {
+    type: "draw",
+    x: e.offsetX,
+    y: e.offsetY,
+    prevX: lastX,
+    prevY: lastY,
+    color: isEraser ? "eraser" : color,
+    size: size
+  };
+
+  drawLine(data);
+  currentStroke.push(data);
+  ws.send(JSON.stringify(data));
+
+  lastX = e.offsetX;
+  lastY = e.offsetY;
+});
+
+function drawLine({ x, y, prevX, prevY, color, size }) {
+  ctx.lineWidth = size;
+  ctx.lineCap = "round";
+
+  if (color === "eraser") {
+    ctx.globalCompositeOperation = "destination-out";
+  } else {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = color;
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(prevX, prevY);
+  ctx.lineTo(x, y);
+  ctx.stroke();
+}
+
+function clearCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  strokes = [];
+
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: "clear" }));
+  }
+}
+
+function undo() {
+  strokes.pop();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  strokes.forEach(stroke => {
+    stroke.forEach(drawLine);
+  });
+}
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === "clear") {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    strokes = [];
+    return;
+  }
+
+  if (data.type === "draw") {
+    drawLine(data);
+  }
+};
+
+</script>
+
+</body>
+</html>
