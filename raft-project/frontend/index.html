@@ -11,6 +11,8 @@
       align-items: center;
       padding: 30px;
       font-family: sans-serif;
+      margin: 0;
+      min-height: 100vh;
     }
 
     h2 {
@@ -35,6 +37,12 @@
       background: white;
       border-radius: 10px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.2);
+    }
+
+    #status {
+      margin-top: 10px;
+      color: white;
+      font-size: 14px;
     }
   </style>
 </head>
@@ -62,13 +70,19 @@
 </div>
 
 <canvas id="canvas" width="800" height="500"></canvas>
+<div id="status">Connecting...</div>
 
 <script>
-
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-const ws = new WebSocket("ws://192.168.0.6:3000");
+function getWsUrl() {
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${location.hostname}:3000`;
+}
+
+const ws = new WebSocket(getWsUrl());
+const statusEl = document.getElementById("status");
 
 let drawing = false;
 let lastX = 0;
@@ -81,6 +95,9 @@ let isEraser = false;
 
 let strokes = [];
 let currentStroke = [];
+let currentStrokeId = null;
+
+const clientId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
 document.getElementById("colorPicker").oninput = (e) => {
   color = e.target.value;
@@ -88,11 +105,11 @@ document.getElementById("colorPicker").oninput = (e) => {
 };
 
 document.getElementById("brushSize").oninput = (e) => {
-  brushSize = e.target.value;
+  brushSize = Number(e.target.value);
 };
 
 document.getElementById("eraserSize").oninput = (e) => {
-  eraserSize = e.target.value;
+  eraserSize = Number(e.target.value);
 };
 
 function setEraser() {
@@ -105,22 +122,31 @@ function setPen() {
   document.getElementById("eraserControls").style.display = "none";
 }
 
+function makeStrokeId() {
+  return `${clientId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 canvas.addEventListener("mousedown", (e) => {
   drawing = true;
   lastX = e.offsetX;
   lastY = e.offsetY;
   currentStroke = [];
+  currentStrokeId = makeStrokeId();
 });
 
 canvas.addEventListener("mouseup", () => {
-  drawing = false;
-  if (currentStroke.length > 0) {
+  if (drawing && currentStroke.length > 0) {
     strokes.push(currentStroke);
   }
+  drawing = false;
+  currentStroke = [];
+  currentStrokeId = null;
 });
 
 canvas.addEventListener("mouseleave", () => {
   drawing = false;
+  currentStroke = [];
+  currentStrokeId = null;
   canvas.style.cursor = "default";
 });
 
@@ -136,12 +162,14 @@ canvas.addEventListener("mousemove", (e) => {
     canvas.style.cursor = "default";
   }
 
-  if (!drawing || ws.readyState !== 1) return;
+  if (!drawing || ws.readyState !== 1 || !currentStrokeId) return;
 
   const size = isEraser ? eraserSize : brushSize;
 
   const data = {
     type: "draw",
+    clientId,
+    strokeId: currentStrokeId,
     x: e.offsetX,
     y: e.offsetY,
     prevX: lastX,
@@ -158,7 +186,11 @@ canvas.addEventListener("mousemove", (e) => {
   lastY = e.offsetY;
 });
 
-function drawLine({ x, y, prevX, prevY, color, size }) {
+function drawLine(data) {
+  if (!data || data.type !== "draw") return;
+
+  const { x, y, prevX, prevY, color, size } = data;
+
   ctx.lineWidth = size;
   ctx.lineCap = "round";
 
@@ -175,37 +207,89 @@ function drawLine({ x, y, prevX, prevY, color, size }) {
   ctx.stroke();
 }
 
-function clearCanvas() {
+function redrawAll() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "source-over";
+
+  strokes.forEach(stroke => {
+    stroke.forEach(segment => drawLine(segment));
+  });
+}
+
+function clearCanvas() {
   strokes = [];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (ws.readyState === 1) {
-    ws.send(JSON.stringify({ type: "clear" }));
+    ws.send(JSON.stringify({
+      type: "clear",
+      clientId
+    }));
   }
 }
 
 function undo() {
-  strokes.pop();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  strokes.forEach(stroke => {
-    stroke.forEach(drawLine);
-  });
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: "undo",
+      clientId
+    }));
+  }
 }
+
+ws.onopen = () => {
+  statusEl.textContent = `Connected to ${getWsUrl()}`;
+};
+
+ws.onclose = () => {
+  statusEl.textContent = "Disconnected";
+};
+
+ws.onerror = () => {
+  statusEl.textContent = "Connection error";
+};
 
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
+  if (data.type === "snapshot") {
+    strokes = Array.isArray(data.strokes) ? data.strokes : [];
+    redrawAll();
+    return;
+  }
+
   if (data.type === "clear") {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     strokes = [];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  if (data.type === "undo") {
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      if (strokes[i].length > 0 && strokes[i][0].clientId === data.clientId) {
+        strokes.splice(i, 1);
+        break;
+      }
+    }
+    redrawAll();
     return;
   }
 
   if (data.type === "draw") {
     drawLine(data);
+
+    let lastStroke = strokes[strokes.length - 1];
+    if (
+      !lastStroke ||
+      lastStroke.length === 0 ||
+      lastStroke[0].strokeId !== data.strokeId
+    ) {
+      lastStroke = [];
+      strokes.push(lastStroke);
+    }
+    lastStroke.push(data);
   }
 };
-
 </script>
 
 </body>
