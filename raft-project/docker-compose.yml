@@ -1,6 +1,14 @@
+version: "3.9"
+
 services:
   gateway:
-    build: ./gateway
+    image: node:18
+    working_dir: /app
+    command: sh -c "npm install && node server.js"
+    volumes:
+      - ./gateway:/app
+      - ./frontend:/frontend
+      - ./frontend:/app/../frontend
     ports:
       - "3000:3000"
       - "5000:5000"
@@ -8,21 +16,51 @@ services:
       - replica1
       - replica2
       - replica3
+    networks:
+      - raftnet
 
   replica1:
-    build: ./replica
+    image: node:18
+    working_dir: /app
+    command: sh -c "npm install && node server.js"
+    volumes:
+      - ./replica:/app
     environment:
-      - PORT=4001
-      - ID=replica1
+      PORT: 4001
+      ID: replica1
+    ports:
+      - "4001:4001"
+    networks:
+      - raftnet
 
   replica2:
-    build: ./replica
+    image: node:18
+    working_dir: /app
+    command: sh -c "npm install && node server.js"
+    volumes:
+      - ./replica:/app
     environment:
-      - PORT=4002
-      - ID=replica2
+      PORT: 4002
+      ID: replica2
+    ports:
+      - "4002:4002"
+    networks:
+      - raftnet
 
   replica3:
-    build: ./replica
+    image: node:18
+    working_dir: /app
+    command: sh -c "npm install && node server.js"
+    volumes:
+      - ./replica:/app
     environment:
-      - PORT=4003
-      - ID=replica3
+      PORT: 4003
+      ID: replica3
+    ports:
+      - "4003:4003"
+    networks:
+      - raftnet
+
+networks:
+  raftnet:
+    driver: bridge
