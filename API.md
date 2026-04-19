@@ -116,10 +116,4 @@ Called by the leader on follower replicas to replicate the entry.
 
 ---
 
-## Assignment-aligned API additions recommended
 
-To match the assignment document more closely, add these routes:
-- `POST /request-vote`
-- `POST /append-entries`
-- `POST /heartbeat`
-- `POST /sync-log`
