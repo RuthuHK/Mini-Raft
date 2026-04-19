@@ -75,16 +75,4 @@ The current code uses simpler endpoint names, but the protocol intent is similar
 ### Restarted node
 The assignment expects a catch-up protocol using `/sync-log`. The current code does not fully implement restart recovery, so this should be added before final submission.
 
-## Limitations in the current repository
-- no persistent storage
-- no bind-mounted hot reload setup
-- no full catch-up synchronization API
-- no separate frontend container
-- no explicit observability dashboard
 
-## Recommended upgrade path
-1. Add explicit log metadata: `term`, `index`, `commitIndex`.
-2. Implement `/sync-log`.
-3. Add bind mounts in Docker Compose.
-4. Add health checks and restart policies.
-5. Add structured logs for leader changes and replication results.
